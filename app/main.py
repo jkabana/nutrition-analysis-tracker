@@ -11,7 +11,10 @@ load_dotenv()
 import httpx
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 
+from app.routes.plateau import router as plateau_router
+
 app = FastAPI()
+app.include_router(plateau_router)
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
