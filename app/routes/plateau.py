@@ -1,43 +1,76 @@
-from fastapi import APIRouter, Depends, HTTPException
+import os
+from datetime import date, timedelta
+from typing import Any, Dict, List, Optional
+
+import httpx
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.analytics.plateau import detect_plateau
-from app.auth import get_current_user
-from app.db import supabase
 
 router = APIRouter()
+
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+APP_USER_ID = os.environ["APP_USER_ID"]  # single-user MVP
+
+
+def sb_headers() -> Dict[str, str]:
+    return {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+    }
+
 
 class PlateauRequest(BaseModel):
     window_days: int = 14
 
 
 @router.post("/analytics/plateau")
-def plateau(payload: PlateauRequest, user=Depends(get_current_user)):
-    user_id = user.id
+async def plateau(payload: PlateauRequest):
+    # Pull enough rows to cover the window; we’ll filter again defensively
+    end_date = date.today()
+    start_date = end_date - timedelta(days=payload.window_days - 1)
 
-    # ⚠️ Update these names to match your schema if different
-    rows = (
-        supabase.table("weight_logs")
-        .select("logged_at, weight")
-        .eq("user_id", user_id)
-        .order("logged_at")
-        .execute()
-        .data
-    )
+    # ⚠️ Update these names if your schema differs
+    TABLE = "weight_logs"
+    DATE_COL = "logged_at"
+    WEIGHT_COL = "weight"
 
+    url = f"{SUPABASE_URL}/rest/v1/{TABLE}"
+    params = {
+        "select": f"{DATE_COL},{WEIGHT_COL}",
+        "user_id": f"eq.{APP_USER_ID}",
+        "order": f"{DATE_COL}.asc",
+        # If your DATE_COL is a date (not timestamp), keep this as-is.
+        # If it's a timestamp, this still works with ISO format.
+        DATE_COL: f"gte.{start_date.isoformat()}",
+    }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(url, headers=sb_headers(), params=params)
+
+    if r.status_code >= 300:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Supabase fetch failed: {r.status_code} {r.text}",
+        )
+
+    rows = r.json()
     if not rows:
-        raise HTTPException(status_code=400, detail="No weigh-ins found for this user")
+        raise HTTPException(status_code=400, detail="No weigh-ins found in the requested window")
 
     weighins = [
-        {"date": r["logged_at"], "weight": r["weight"]}
-        for r in rows
-        if r.get("weight") is not None and r.get("logged_at") is not None
+        {"date": row.get(DATE_COL), "weight": row.get(WEIGHT_COL)}
+        for row in rows
+        if row.get(DATE_COL) is not None and row.get(WEIGHT_COL) is not None
     ]
 
     result = detect_plateau(
         weighins,
         window_days=payload.window_days,
-        # Optional: add sodium_series later
+        min_weighins=10,
         sodium_series=None,
     )
 
