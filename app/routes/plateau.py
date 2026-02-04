@@ -90,4 +90,3 @@ async def plateau(payload: PlateauRequest):
         "plateau": result,
         "status": status,
     }
-o
