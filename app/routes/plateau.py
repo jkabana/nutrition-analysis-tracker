@@ -1,6 +1,6 @@
 import os
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Dict
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -10,9 +10,10 @@ from app.analytics.plateau import detect_plateau
 
 router = APIRouter()
 
+# Environment (single-user MVP)
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-APP_USER_ID = os.environ["APP_USER_ID"]  # single-user MVP
+APP_USER_ID = os.environ["APP_USER_ID"]
 
 
 def sb_headers() -> Dict[str, str]:
@@ -29,11 +30,11 @@ class PlateauRequest(BaseModel):
 
 @router.post("/analytics/plateau")
 async def plateau(payload: PlateauRequest):
-    # Pull enough rows to cover the window; we’ll filter again defensively
+    # Date window
     end_date = date.today()
     start_date = end_date - timedelta(days=payload.window_days - 1)
 
-    # ⚠️ Update these names if your schema differs
+    # Supabase schema (confirmed)
     TABLE = "weigh_ins"
     DATE_COL = "weigh_date"
     WEIGHT_COL = "weight_lbs"
@@ -43,8 +44,6 @@ async def plateau(payload: PlateauRequest):
         "select": f"{DATE_COL},{WEIGHT_COL}",
         "user_id": f"eq.{APP_USER_ID}",
         "order": f"{DATE_COL}.asc",
-        # If your DATE_COL is a date (not timestamp), keep this as-is.
-        # If it's a timestamp, this still works with ISO format.
         DATE_COL: f"gte.{start_date.isoformat()}",
     }
 
@@ -59,7 +58,10 @@ async def plateau(payload: PlateauRequest):
 
     rows = r.json()
     if not rows:
-        raise HTTPException(status_code=400, detail="No weigh-ins found in the requested window")
+        raise HTTPException(
+            status_code=400,
+            detail="No weigh-ins found in the requested window",
+        )
 
     weighins = [
         {"date": row.get(DATE_COL), "weight": row.get(WEIGHT_COL)}
@@ -74,5 +76,18 @@ async def plateau(payload: PlateauRequest):
         sodium_series=None,
     )
 
-    return {"plateau": result}
+    # ---- Status classification (API-layer interpretation) ----
+    status = "on_track"
 
+    if result.get("reason") == "insufficient_weighins":
+        status = "insufficient_data"
+    elif result.get("detected"):
+        status = "plateau"
+    elif result.get("flat_trend") and result.get("net_change_lbs", 0) <= -0.5:
+        status = "slow_loss"
+
+    return {
+        "plateau": result,
+        "status": status,
+    }
+o
