@@ -34,9 +34,9 @@ async def plateau(payload: PlateauRequest):
     start_date = end_date - timedelta(days=payload.window_days - 1)
 
     # ⚠️ Update these names if your schema differs
-    TABLE = "weight_logs"
-    DATE_COL = "logged_at"
-    WEIGHT_COL = "weight"
+    TABLE = "weigh_ins"
+    DATE_COL = "weigh_date"
+    WEIGHT_COL = "weight_lbs"
 
     url = f"{SUPABASE_URL}/rest/v1/{TABLE}"
     params = {
