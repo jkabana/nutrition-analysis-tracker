@@ -12,9 +12,12 @@ import httpx
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 
 from app.routes.plateau import router as plateau_router
+from app.routes.import_mfp import router as import_mfp_router
 
 app = FastAPI()
+
 app.include_router(plateau_router)
+app.include_router(import_mfp_router)
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
@@ -52,8 +55,9 @@ def stable_hash(*parts: str) -> str:
     s = "|".join([p or "" for p in parts])
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
-
-def parse_weight_lbs(text: str) -> float | None:
+from typing import Optional
+# ...
+def parse_weight_lbs(text: str) -> Optional[float]:
     # Accepts: "184", "184.6", "184.6 lb", etc.
     m = re.search(r"(\d{2,3}(?:\.\d{1,2})?)", text)
     if not m:
